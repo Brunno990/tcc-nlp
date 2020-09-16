@@ -1,0 +1,178 @@
+import numpy as np
+import pandas as pd
+import spacy
+
+with open('2019-07-03-brunno.csv') as csvfile:
+    df = pd.read_csv(csvfile, ';')
+    df.columns = ['text', 'label']
+csvfile.close()
+df.shape
+(1605, 2)
+
+# selecionamos apenas os dados rotulados como yes, no, partial
+df_op = (df['label'] == 'yes') | (df['label'] == 'no') | (df['label'] == 'partial')  #| (df['label'] == 'prejudicada') | (df['label'] == 'not-cognized') | (df['label'] == 'conflito-competencia')
+df = df[df_op]
+df.shape
+(1523, 2)
+
+import time
+
+start = time.time()
+
+import numpy as np
+import pandas as pd
+import spacy
+
+nlp = spacy.load('pt')
+stopwords = spacy.lang.pt.stop_words.STOP_WORDS
+# exclui algumas palavras da lista de stop-words
+stopwords_to_remove = ['conhecida', 'conhecido', 'não', 'sem', 'parte']
+for word in stopwords_to_remove:
+    stopwords.remove(word)
+# adiciona algumas palavras da lista de stop-words    
+stopwords.add('e')
+
+# verificando a remoção e adição de stop-words
+if 'não' in stopwords: print('não é stopword')
+if 'conhecida' in stopwords: print('conhecida é stopword')
+if 'e' in stopwords: print('e é stopword')
+    
+def apply_cleaning_function_to_list(X):
+    cleaned_X = []
+    for element in X:
+        cleaned_X.append(clean_text(element))
+    return cleaned_X
+
+def clean_text(raw_text):
+    """Lower case, remove stop-words, remove punctuation, and extracts lemmas."""
+    text = raw_text.lower()
+    doc = nlp(text)
+    words = [w for w in doc if not w.is_stop and not w.is_punct]
+    return [w.lemma_ for w in words]
+
+text_to_clean = list(df['text'])
+df['cleaned_text'] = apply_cleaning_function_to_list(text_to_clean)
+df
+
+end = time.time()
+total_time = end - start
+print('Execution time in seconds: ' + str(total_time) )
+
+
+df.to_csv('dados_limpos.csv', ';', index=False)
+
+
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.naive_bayes import MultinomialNB
+
+labels = ['yes', 'no', 'partial']#, 'prejudicada', 'not-cognized', 'conflito-competencia']
+
+def label_to_number(x):
+    return {
+        'yes': 0,
+        'no': 1,
+        'partial': 2#,
+#         'prejudicada': 3,
+#         'not-cognized': 4,
+#         'conflito-competencia': 5
+    }[x]
+
+with open('dados_limpos.csv') as csvfile:
+    df = pd.read_csv(csvfile, ';')
+    df.columns = ['text', 'label', 'cleaned_text']
+csvfile.close()
+df
+
+# codificando o label 
+for i in range(len(df['label'])):
+    label = label_to_number(df['label'][i])
+    df['label'][i] = label
+df
+  
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn import preprocessing
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import SVC
+from xgboost.sklearn import XGBClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import ShuffleSplit
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+
+
+def svc_param_selection(X, y, nfolds):
+    Cs = [0.001, 0.01, 0.1, 1, 10]
+    gammas = [0.001, 0.01, 0.1, 1]
+    degree=[1,2,3,4,5,6,7,8,9]
+    kernel=[ 'linear', 'poly', 'rbf', 'sigmoid', 'precomputed']
+    param_grid = {'C': Cs, 'gamma' : gammas}
+    grid_search = GridSearchCV(SVC(kernel='rbf'), param_grid, cv=nfolds)
+    grid_search.fit(X, y)
+    grid_search.best_estimator_
+    return grid_search.best_estimator_ 
+def xgboost_param_selection(X, y, nfolds):
+    param_grid = {'objective':['multi:softmax'],
+              'learning_rate': [0.3], #so called `eta` value
+              'max_depth': [6],
+              'min_child_weight': [1,2,3],
+              'silent': [1],
+              'subsample': [1],
+              'colsample_bytree': [1],
+              'n_estimators': [1000], #number of trees, change it to 1000 for better results
+              'missing':[-999]}
+    grid_search = GridSearchCV(XGBClassifier(), param_grid, cv=nfolds)
+    grid_search.fit(X, y)
+    grid_search.best_estimator_
+    return grid_search.best_estimator_ 
+
+
+X_preprocessed = df['cleaned_text']
+vectorizer = TfidfVectorizer()
+vectorizer.fit(X_preprocessed)
+X_tfidf = vectorizer.transform(X_preprocessed)
+
+le = preprocessing.LabelEncoder()
+y_coded=le.fit_transform(df['label'])
+y_coded
+
+
+import time
+
+start = time.time()
+num_folds=5 
+cv = ShuffleSplit(n_splits=num_folds, test_size=0.2, random_state=1)
+
+best_SVM=svc_param_selection(X_tfidf, y_coded, num_folds)
+print('Best SVM parameters are:\n' + str(best_SVM))
+best_XG=xgboost_param_selection(X_tfidf, y_coded, num_folds)
+print('Best XGBoost parameters are:\n' + str(best_XG))
+
+clf = GaussianNB()
+clf2=DecisionTreeClassifier()
+clf3=best_SVM
+clf4=RandomForestClassifier(n_estimators=100, max_depth=4,random_state=0)
+clf5=best_XG
+scores = cross_val_score(clf, X_tfidf.toarray(), y_coded, cv=cv)
+scores2 = cross_val_score(clf2, X_tfidf.toarray(), y_coded, cv=cv)
+scores3 = cross_val_score(clf3, X_tfidf.toarray(), y_coded, cv=cv)
+scores4 = cross_val_score(clf4, X_tfidf.toarray(), y_coded, cv=cv)
+scores5 = cross_val_score(clf5, X_tfidf.toarray(), y_coded, cv=cv)
+
+end = time.time()
+total_time = end - start
+print('Execution time in seconds: ' + str(total_time) )
+
+print('== SCORES ==     \n   Gaussian NB  :' + str(scores) +     '\n   Decision Tree:' + str(scores2) +     '\n   SVM          :' + str(scores3) +     '\n   Random Forest:' + str(scores4) +     '\n   XGBoost      :' + str(scores5) )
+
+print('\n== SCORES MEAND AND STD==')
+print("Accuracy NB: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() ))
+print("Accuracy DT: %0.4f (+/- %0.4f)" % (scores2.mean(), scores2.std() ))
+print("Accuracy SVM: %0.4f (+/- %0.4f)" % (scores3.mean(), scores3.std() ))
+print("Accuracy RF: %0.4f (+/- %0.4f)" % (scores4.mean(), scores4.std() ))
+print("Accuracy XGBOOST: %0.4f (+/- %0.4f)" % (scores5.mean(), scores5.std() ))
